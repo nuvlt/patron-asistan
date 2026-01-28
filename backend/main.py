@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import io
 import json
 from typing import Optional
+from prophet import Prophet
 from sklearn.linear_model import LinearRegression
 import plotly.graph_objects as go
 import plotly.express as px
@@ -95,8 +96,72 @@ def analyze_excel(df: pd.DataFrame, target_column: str):
         "can_forecast": len(df) >= 10  # En az 10 veri noktası
     }
 
+def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
+    """Prophet ile gelişmiş forecast (yedek: sklearn)"""
+    
+    try:
+        # Prophet formatına dönüştür
+        prophet_df = pd.DataFrame({
+            'ds': pd.to_datetime(df[date_col]),
+            'y': df[target_column]
+        })
+        
+        # Model oluştur ve eğit
+        model = Prophet(
+            daily_seasonality=False,
+            weekly_seasonality=True,
+            yearly_seasonality=True if len(prophet_df) > 365 else False,
+            changepoint_prior_scale=0.05
+        )
+        model.fit(prophet_df)
+        
+        # Gelecek tahminleri
+        future = model.make_future_dataframe(periods=periods, freq='MS')
+        forecast = model.predict(future)
+        
+        # Son periods kadar tahmin al
+        future_forecast = forecast.tail(periods)
+        
+        forecasts = []
+        for idx, row in future_forecast.iterrows():
+            forecasts.append({
+                "date": row['ds'].strftime('%Y-%m-%d'),
+                "value": round(max(0, row['yhat']), 2),
+                "lower": round(max(0, row['yhat_lower']), 2),
+                "upper": round(max(0, row['yhat_upper']), 2),
+                "month": len(forecasts) + 1
+            })
+        
+        # Grafik verisi hazırla
+        historical = prophet_df.tail(12)
+        
+        chart_data = {
+            "historical": {
+                "dates": historical['ds'].dt.strftime('%Y-%m-%d').tolist(),
+                "values": historical['y'].tolist()
+            },
+            "forecast": {
+                "dates": [f['date'] for f in forecasts],
+                "values": [f['value'] for f in forecasts],
+                "lower": [f['lower'] for f in forecasts],
+                "upper": [f['upper'] for f in forecasts]
+            }
+        }
+        
+        return {
+            "success": True,
+            "forecasts": forecasts,
+            "method": "prophet",
+            "chart_data": chart_data
+        }
+    
+    except Exception as e:
+        # Prophet başarısız olursa sklearn'e düş
+        print(f"Prophet failed, falling back to sklearn: {str(e)}")
+        return smart_forecast(df, target_column, date_col, periods)
+
 def smart_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
-    """Akıllı forecast (Linear Regression + Seasonality)"""
+    """Akıllı forecast (Linear Regression + Seasonality) - Prophet yedek"""
     
     try:
         # Tarihleri sayıya çevir
@@ -169,7 +234,7 @@ def smart_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods:
         return {
             "success": True,
             "forecasts": forecasts,
-            "method": "linear_regression_with_seasonality",
+            "method": "linear_regression_fallback",
             "r2_score": round(r2_score, 3),
             "chart_data": chart_data
         }
@@ -233,7 +298,7 @@ async def analyze_file(
                 pass
         
         if analysis["can_forecast"] and date_col:
-            forecast_result = smart_forecast(df, target_column, date_col)
+            forecast_result = prophet_forecast(df, target_column, date_col)
         
         # Claude prompt için hazırla
         claude_input = {

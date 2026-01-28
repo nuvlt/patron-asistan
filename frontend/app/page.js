@@ -194,7 +194,7 @@ Lütfen şu başlıklarla cevap ver:
             {result.forecast && result.forecast.success && (
               <div className="bg-white rounded-lg shadow-lg p-8">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6">
-                  🔮 Akıllı Tahmin (4 Ay)
+                  🔮 Prophet AI ile 4 Aylık Tahmin
                 </h2>
                 
                 {/* Grafik */}
@@ -305,7 +305,7 @@ Lütfen şu başlıklarla cevap ver:
                 
                 <div className="mt-6 bg-blue-50 border border-blue-200 p-4 rounded-lg">
                   <p className="text-sm text-blue-800">
-                    ℹ️ <strong>Akıllı Tahmin:</strong> Makine öğrenimi ile trend ve haftalık mevsimsellik analizi yapılır. %95 güven aralığı ile birlikte sunulur.
+                    ℹ️ <strong>Prophet Nedir?</strong> Facebook tarafından geliştirilen, mevsimsellik ve trend değişimlerini otomatik tespit eden gelişmiş bir tahmin algoritmasıdır. Sklearn yedek olarak kullanılır.
                   </p>
                 </div>
               </div>
