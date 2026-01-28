@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import io
 import json
 from typing import Optional
-from prophet import Prophet
+from sklearn.linear_model import LinearRegression
 import plotly.graph_objects as go
 import plotly.express as px
 import warnings
@@ -95,49 +95,65 @@ def analyze_excel(df: pd.DataFrame, target_column: str):
         "can_forecast": len(df) >= 10  # En az 10 veri noktası
     }
 
-def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
-    """Prophet ile gelişmiş forecast"""
+def smart_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
+    """Akıllı forecast (Linear Regression + Seasonality)"""
     
     try:
-        # Prophet formatına dönüştür
-        prophet_df = pd.DataFrame({
-            'ds': pd.to_datetime(df[date_col]),
-            'y': df[target_column]
-        })
+        # Tarihleri sayıya çevir
+        df = df.sort_values(by=date_col)
+        df['days'] = (df[date_col] - df[date_col].min()).dt.days
         
-        # Model oluştur ve eğit
-        model = Prophet(
-            daily_seasonality=False,
-            weekly_seasonality=True,
-            yearly_seasonality=True if len(prophet_df) > 365 else False,
-            changepoint_prior_scale=0.05
-        )
-        model.fit(prophet_df)
+        # Train data
+        X = df[['days']].values
+        y = df[target_column].values
         
-        # Gelecek tahminleri
-        future = model.make_future_dataframe(periods=periods, freq='MS')  # Monthly Start
-        forecast = model.predict(future)
+        # Linear regression model
+        model = LinearRegression()
+        model.fit(X, y)
         
-        # Son periods kadar tahmin al
-        future_forecast = forecast.tail(periods)
+        # Mevsimsellik tespit (haftalık pattern)
+        df['weekday'] = df[date_col].dt.dayofweek
+        weekly_avg = df.groupby('weekday')[target_column].mean()
+        overall_avg = df[target_column].mean()
+        seasonal_factor = (weekly_avg / overall_avg).to_dict()
+        
+        # Tahminler
+        last_date = df[date_col].max()
+        last_days = df['days'].max()
         
         forecasts = []
-        for idx, row in future_forecast.iterrows():
+        for i in range(1, periods + 1):
+            # Tahmin tarihi
+            forecast_date = last_date + timedelta(days=30 * i)
+            forecast_days = last_days + (30 * i)
+            
+            # Temel tahmin
+            base_prediction = model.predict([[forecast_days]])[0]
+            
+            # Mevsimsellik ekle
+            weekday = forecast_date.weekday()
+            seasonal_adjustment = seasonal_factor.get(weekday, 1.0)
+            forecast_value = base_prediction * seasonal_adjustment
+            
+            # Güven aralığı (basit yaklaşım)
+            std_error = np.std(y - model.predict(X))
+            confidence_interval = 1.96 * std_error  # %95
+            
             forecasts.append({
-                "date": row['ds'].strftime('%Y-%m-%d'),
-                "value": round(max(0, row['yhat']), 2),
-                "lower": round(max(0, row['yhat_lower']), 2),
-                "upper": round(max(0, row['yhat_upper']), 2),
-                "month": len(forecasts) + 1
+                "date": forecast_date.strftime('%Y-%m-%d'),
+                "value": round(max(0, forecast_value), 2),
+                "lower": round(max(0, forecast_value - confidence_interval), 2),
+                "upper": round(max(0, forecast_value + confidence_interval), 2),
+                "month": i
             })
         
         # Grafik verisi hazırla
-        historical = prophet_df.tail(12)  # Son 12 veri noktası
+        historical = df.tail(12)
         
         chart_data = {
             "historical": {
-                "dates": historical['ds'].dt.strftime('%Y-%m-%d').tolist(),
-                "values": historical['y'].tolist()
+                "dates": historical[date_col].dt.strftime('%Y-%m-%d').tolist(),
+                "values": historical[target_column].tolist()
             },
             "forecast": {
                 "dates": [f['date'] for f in forecasts],
@@ -147,17 +163,21 @@ def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, period
             }
         }
         
+        # Model performans metrikleri
+        r2_score = model.score(X, y)
+        
         return {
             "success": True,
             "forecasts": forecasts,
-            "method": "prophet",
+            "method": "linear_regression_with_seasonality",
+            "r2_score": round(r2_score, 3),
             "chart_data": chart_data
         }
     
     except Exception as e:
         return {
             "success": False,
-            "message": f"Prophet forecast yapılamadı: {str(e)}"
+            "message": f"Forecast yapılamadı: {str(e)}"
         }
 
 @app.get("/")
@@ -213,7 +233,7 @@ async def analyze_file(
                 pass
         
         if analysis["can_forecast"] and date_col:
-            forecast_result = prophet_forecast(df, target_column, date_col)
+            forecast_result = smart_forecast(df, target_column, date_col)
         
         # Claude prompt için hazırla
         claude_input = {
