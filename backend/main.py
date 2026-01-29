@@ -139,6 +139,9 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
         # Dönem bilgisi
         date_range = f"Son {len(clean_values)} dönem"
         
+        # Forecast için veriyi hazırla (time series formatına çevir)
+        period_data = clean_values  # Tüm temiz değerler
+        
         return {
             "success": True,
             "target_column": target_item,
@@ -148,15 +151,77 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
             "risk_level": risk_level,
             "average_value": round(np.mean(recent_values), 2),
             "data_points": len(clean_values),
-            "can_forecast": False,  # Wide format için forecast şimdilik kapalı
+            "can_forecast": len(clean_values) >= 6,  # En az 6 dönem varsa forecast yap
             "format_type": "wide_format",
-            "available_items": items[:20]
+            "available_items": items[:20],
+            "period_data": period_data  # Forecast için
         }
     
     except Exception as e:
         return {
             "success": False,
             "message": f"Wide format analiz hatası: {str(e)}"
+        }
+
+def wide_format_forecast(period_data: list, periods: int = 4):
+    """Wide format için basit forecast (dönem bazlı)"""
+    
+    try:
+        # Veriyi zaman serisi gibi düşün (her değer bir dönem)
+        n = len(period_data)
+        
+        # Linear regression
+        X = np.array(range(n)).reshape(-1, 1)
+        y = np.array(period_data)
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        # Tahminler
+        forecasts = []
+        for i in range(1, periods + 1):
+            future_x = n + i - 1
+            forecast_value = model.predict([[future_x]])[0]
+            
+            # Güven aralığı
+            std_error = np.std(y - model.predict(X))
+            
+            forecasts.append({
+                "date": f"Dönem {n + i}",
+                "value": round(max(0, forecast_value), 2),
+                "lower": round(max(0, forecast_value - std_error * 1.96), 2),
+                "upper": round(max(0, forecast_value + std_error * 1.96), 2),
+                "month": i
+            })
+        
+        # Grafik verisi
+        historical_count = min(12, len(period_data))
+        historical = period_data[-historical_count:]
+        
+        chart_data = {
+            "historical": {
+                "dates": [f"Dönem {i+1}" for i in range(len(historical))],
+                "values": historical
+            },
+            "forecast": {
+                "dates": [f['date'] for f in forecasts],
+                "values": [f['value'] for f in forecasts],
+                "lower": [f['lower'] for f in forecasts],
+                "upper": [f['upper'] for f in forecasts]
+            }
+        }
+        
+        return {
+            "success": True,
+            "forecasts": forecasts,
+            "method": "linear_regression_period_based",
+            "chart_data": chart_data
+        }
+    
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Wide format forecast hatası: {str(e)}"
         }
 
 def analyze_excel(df: pd.DataFrame, target_column: str):
@@ -411,7 +476,11 @@ async def analyze_file(
         if is_wide:
             # Wide format (oyun bazlı satışlar gibi)
             analysis = analyze_wide_format(df)
-            forecast_result = None  # Şimdilik wide format'ta forecast yok
+            
+            # Wide format için forecast
+            forecast_result = None
+            if analysis.get("can_forecast") and analysis.get("period_data"):
+                forecast_result = wide_format_forecast(analysis["period_data"])
             
         else:
             # Long format (standart zaman serisi)
@@ -439,7 +508,7 @@ async def analyze_file(
             "target_column": analysis.get("target_column", "Bilinmiyor"),
             "date_range": analysis.get("date_range", "Bilinmiyor"),
             "trend_summary": f"{analysis.get('trend', 'sabit')} ({analysis.get('trend_percentage', 0)}%)",
-            "forecast_result": forecast_result if forecast_result else "Wide format için forecast henüz desteklenmiyor",
+            "forecast_result": forecast_result if forecast_result else "Forecast için yeterli veri yok",
             "risk_level": analysis.get("risk_level", "bilinmiyor"),
             "average_value": analysis.get("average_value", 0),
             "data_points": analysis.get("data_points", 0),
