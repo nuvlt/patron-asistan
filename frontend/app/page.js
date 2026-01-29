@@ -197,6 +197,15 @@ Lütfen şu başlıklarla cevap ver:
                   🔮 Prophet AI ile 4 Aylık Tahmin
                 </h2>
                 
+                {/* Birim açıklaması */}
+                <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
+                  <p className="text-sm text-blue-800">
+                    💡 <strong>Değerler:</strong> {result.format_detected === 'wide' 
+                      ? 'Bin TL cinsinden aylık toplam cirolar' 
+                      : 'TL cinsinden değerler'}
+                  </p>
+                </div>
+                
                 {/* Grafik */}
                 {result.forecast.chart_data && (
                   <div className="mb-8 bg-gray-50 p-6 rounded-lg">
@@ -207,12 +216,12 @@ Lütfen şu başlıklarla cevap ver:
                       <AreaChart
                         data={[
                           ...result.forecast.chart_data.historical.dates.map((date, idx) => ({
-                            date: date.includes('Dönem') ? date : new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
+                            date: date,
                             Gerçekleşen: result.forecast.chart_data.historical.values[idx],
                             type: 'historical'
                           })),
                           ...result.forecast.chart_data.forecast.dates.map((date, idx) => ({
-                            date: date.includes('Dönem') ? date : new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
+                            date: date,
                             Tahmin: result.forecast.chart_data.forecast.values[idx],
                             'Alt Sınır': result.forecast.chart_data.forecast.lower[idx],
                             'Üst Sınır': result.forecast.chart_data.forecast.upper[idx],
@@ -281,7 +290,7 @@ Lütfen şu başlıklarla cevap ver:
                       </AreaChart>
                     </ResponsiveContainer>
                     <p className="text-sm text-gray-600 mt-4 text-center">
-                      💡 Mavi alan: Geçmiş veriler | Yeşil alan: Prophet tahmini | Gri çizgiler: Tahmin aralığı
+                      💡 Mavi alan: Geçmiş veriler (Bin TL) | Yeşil alan: Tahmin (Bin TL) | Gri çizgiler: Güven aralığı (%95)
                     </p>
                   </div>
                 )}
@@ -290,23 +299,26 @@ Lütfen şu başlıklarla cevap ver:
                 <div className="space-y-3">
                   <h3 className="text-lg font-semibold text-gray-700 mb-3">
                     📊 Detaylı Tahminler
+                    <span className="text-sm font-normal text-gray-500 ml-2">
+                      (Bin TL)
+                    </span>
                   </h3>
                   {result.forecast.forecasts.map((f, idx) => (
                     <div key={idx} className="bg-gradient-to-r from-green-50 to-emerald-50 p-5 rounded-lg border border-green-200">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-gray-700 text-lg">
-                          {f.date.includes('Dönem') 
-                            ? f.date 
-                            : `${idx + 1}. Ay - ${new Date(f.date).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })}`
-                          }
+                          {f.date}
                         </span>
                         <span className="text-2xl font-bold text-green-700">
-                          {f.value.toLocaleString('tr-TR')} ₺
+                          {f.value.toLocaleString('tr-TR')} bin ₺
                         </span>
                       </div>
                       <div className="flex justify-between text-sm text-gray-600">
-                        <span>Alt Sınır: {f.lower.toLocaleString('tr-TR')} ₺</span>
-                        <span>Üst Sınır: {f.upper.toLocaleString('tr-TR')} ₺</span>
+                        <span>Alt Sınır: {f.lower.toLocaleString('tr-TR')} bin ₺</span>
+                        <span>Üst Sınır: {f.upper.toLocaleString('tr-TR')} bin ₺</span>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500 italic">
+                        Gerçek değer: ~{(f.value * 1000).toLocaleString('tr-TR')} ₺
                       </div>
                     </div>
                   ))}
