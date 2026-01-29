@@ -23,6 +23,65 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def parse_period_headers(df: pd.DataFrame) -> dict:
+    """
+    Wide format kolon başlıklarını parse et ve tarihlere çevir
+    Örnek: 'Ağu YTD Act' → Ağustos 2024
+    """
+    
+    # Türkçe ay isimleri
+    ay_map = {
+        'oca': 1, 'ocak': 1,
+        'şub': 2, 'şubat': 2,
+        'mar': 3, 'mart': 3,
+        'nis': 4, 'nisan': 4,
+        'may': 5, 'mayıs': 5,
+        'haz': 6, 'haziran': 6,
+        'tem': 7, 'temmuz': 7,
+        'ağu': 8, 'ağustos': 8,
+        'eyl': 9, 'eylül': 9,
+        'eki': 10, 'ekim': 10,
+        'kas': 11, 'kasım': 11,
+        'ara': 12, 'aralık': 12
+    }
+    
+    period_info = []
+    current_year = 2022  # Başlangıç yılı
+    
+    for col in df.columns[1:]:  # İlk kolon (id) hariç
+        col_lower = str(col).lower().replace('\\n', ' ')
+        
+        # Yıl kontrolü
+        for year in range(2022, 2030):
+            if str(year) in col_lower:
+                current_year = year
+                break
+        
+        # Ay kontrolü
+        found_month = None
+        for ay_key, ay_num in ay_map.items():
+            if ay_key in col_lower:
+                found_month = ay_num
+                break
+        
+        if found_month:
+            # Tarih nesnesi oluştur
+            try:
+                date_obj = datetime(current_year, found_month, 1)
+                period_info.append({
+                    'column': col,
+                    'date': date_obj,
+                    'display': date_obj.strftime('%b %Y')  # Kas 2024
+                })
+            except:
+                period_info.append({
+                    'column': col,
+                    'date': None,
+                    'display': str(col)
+                })
+    
+    return period_info
+
 def is_wide_format(df: pd.DataFrame) -> bool:
     """Excel'in wide format olup olmadığını kontrol et"""
     
@@ -60,7 +119,7 @@ def is_wide_format(df: pd.DataFrame) -> bool:
 
 def analyze_wide_format(df: pd.DataFrame) -> dict:
     """
-    Wide format analizi
+    Wide format analizi - Gerçek tarihlerle
     Satırlarda: Ürün/Oyun/Kategori
     Kolonlarda: Dönemler (aylar, yıllar)
     """
@@ -74,6 +133,9 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
                 "success": False,
                 "message": "Analiz edilecek öğe bulunamadı"
             }
+        
+        # Kolon başlıklarını parse et
+        period_info = parse_period_headers(df)
         
         # En yüksek toplam değeri bul
         numeric_cols = df.select_dtypes(include=[np.number]).columns
@@ -91,24 +153,52 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
         
         # Target item'ın verisini al
         target_row = df.iloc[max_idx]
-        values = target_row[numeric_cols].values
         
-        # NaN ve 0'ları temizle
-        clean_values = [float(v) for v in values if pd.notna(v) and v != 0]
+        # Sadece tarih bilgisi olan kolonları al
+        dated_values = []
+        dated_periods = []
         
-        if len(clean_values) < 3:
+        for info in period_info:
+            if info['date'] and info['column'] in df.columns:
+                val = target_row[info['column']]
+                if pd.notna(val) and val != 0:
+                    try:
+                        dated_values.append(float(val))
+                        dated_periods.append(info)
+                    except:
+                        pass
+        
+        if len(dated_values) < 3:
             return {
                 "success": False,
                 "message": f"{target_item} için yeterli veri yok (min 3 dönem gerekli)"
             }
         
-        # Son 12 dönemi al (veya mevcut kadarını)
-        recent_count = min(12, len(clean_values))
-        recent_values = clean_values[-recent_count:]
+        # Anomali tespiti (outlier detection)
+        values_array = np.array(dated_values)
+        mean_val = np.mean(values_array)
+        std_val = np.std(values_array)
         
-        # Trend hesapla
-        first_half = np.mean(recent_values[:len(recent_values)//2])
-        second_half = np.mean(recent_values[len(recent_values)//2:])
+        # Z-score ile outlier tespiti
+        z_scores = np.abs((values_array - mean_val) / (std_val + 0.0001))
+        outliers = z_scores > 3  # 3 sigma dışı
+        
+        # Outlier'ları temizle (forecast için)
+        clean_values_for_forecast = [v for i, v in enumerate(dated_values) if not outliers[i]]
+        
+        # Son 12 dönemi al (analiz için - outlier'lar dahil)
+        recent_count = min(12, len(dated_values))
+        recent_values = dated_values[-recent_count:]
+        recent_periods = dated_periods[-recent_count:]
+        
+        # Trend hesapla (outlier'sız)
+        if len(clean_values_for_forecast) >= 6:
+            recent_clean = clean_values_for_forecast[-6:]
+            first_half = np.mean(recent_clean[:len(recent_clean)//2])
+            second_half = np.mean(recent_clean[len(recent_clean)//2:])
+        else:
+            first_half = np.mean(recent_values[:len(recent_values)//2])
+            second_half = np.mean(recent_values[len(recent_values)//2:])
         
         if first_half > 0:
             trend_pct = ((second_half - first_half) / first_half) * 100
@@ -127,7 +217,7 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
             trend = "sabit"
         
         # Risk hesapla
-        volatility = np.std(recent_values) / (np.mean(recent_values) + 0.0001)
+        volatility = np.std(clean_values_for_forecast) / (np.mean(clean_values_for_forecast) + 0.0001)
         
         if volatility > 0.4:
             risk_level = "yüksek"
@@ -136,11 +226,13 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
         else:
             risk_level = "düşük"
         
-        # Dönem bilgisi
-        date_range = f"Son {len(clean_values)} dönem"
-        
-        # Forecast için veriyi hazırla (time series formatına çevir)
-        period_data = clean_values  # Tüm temiz değerler
+        # Tarih aralığı
+        if len(dated_periods) > 0:
+            start_date = dated_periods[0]['date'].strftime('%b %Y')
+            end_date = dated_periods[-1]['date'].strftime('%b %Y')
+            date_range = f"{start_date} - {end_date}"
+        else:
+            date_range = f"Son {len(dated_values)} dönem"
         
         return {
             "success": True,
@@ -149,12 +241,14 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
             "trend": trend,
             "trend_percentage": round(trend_pct, 2),
             "risk_level": risk_level,
-            "average_value": round(np.mean(recent_values), 2),
-            "data_points": len(clean_values),
-            "can_forecast": len(clean_values) >= 6,  # En az 6 dönem varsa forecast yap
+            "average_value": round(np.mean(clean_values_for_forecast), 2),
+            "data_points": len(dated_values),
+            "can_forecast": len(clean_values_for_forecast) >= 6,
             "format_type": "wide_format",
             "available_items": items[:20],
-            "period_data": period_data  # Forecast için
+            "period_data": clean_values_for_forecast,  # Outlier'sız veriler
+            "period_info": dated_periods,  # Tarih bilgileri
+            "outliers_detected": int(sum(outliers))
         }
     
     except Exception as e:
@@ -163,11 +257,10 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
             "message": f"Wide format analiz hatası: {str(e)}"
         }
 
-def wide_format_forecast(period_data: list, periods: int = 4):
-    """Wide format için basit forecast (dönem bazlı)"""
+def wide_format_forecast(period_data: list, period_info: list, periods: int = 4):
+    """Wide format için forecast - gerçek tarihlerle"""
     
     try:
-        # Veriyi zaman serisi gibi düşün (her değer bir dönem)
         n = len(period_data)
         
         # Linear regression
@@ -176,6 +269,12 @@ def wide_format_forecast(period_data: list, periods: int = 4):
         
         model = LinearRegression()
         model.fit(X, y)
+        
+        # Son tarih
+        if len(period_info) > 0:
+            last_date = period_info[-1]['date']
+        else:
+            last_date = datetime.now()
         
         # Tahminler
         forecasts = []
@@ -186,8 +285,11 @@ def wide_format_forecast(period_data: list, periods: int = 4):
             # Güven aralığı
             std_error = np.std(y - model.predict(X))
             
+            # Gelecek tarih (her ay için)
+            future_date = last_date + timedelta(days=30 * i)
+            
             forecasts.append({
-                "date": f"Dönem {n + i}",
+                "date": future_date.strftime('%b %Y'),  # Oca 2027
                 "value": round(max(0, forecast_value), 2),
                 "lower": round(max(0, forecast_value - std_error * 1.96), 2),
                 "upper": round(max(0, forecast_value + std_error * 1.96), 2),
@@ -197,10 +299,11 @@ def wide_format_forecast(period_data: list, periods: int = 4):
         # Grafik verisi
         historical_count = min(12, len(period_data))
         historical = period_data[-historical_count:]
+        historical_periods = period_info[-historical_count:] if len(period_info) >= historical_count else []
         
         chart_data = {
             "historical": {
-                "dates": [f"Dönem {i+1}" for i in range(len(historical))],
+                "dates": [p['display'] for p in historical_periods] if historical_periods else [f"Dönem {i+1}" for i in range(len(historical))],
                 "values": historical
             },
             "forecast": {
@@ -214,7 +317,7 @@ def wide_format_forecast(period_data: list, periods: int = 4):
         return {
             "success": True,
             "forecasts": forecasts,
-            "method": "linear_regression_period_based",
+            "method": "linear_regression_with_dates",
             "chart_data": chart_data
         }
     
@@ -480,7 +583,10 @@ async def analyze_file(
             # Wide format için forecast
             forecast_result = None
             if analysis.get("can_forecast") and analysis.get("period_data"):
-                forecast_result = wide_format_forecast(analysis["period_data"])
+                forecast_result = wide_format_forecast(
+                    analysis["period_data"],
+                    analysis.get("period_info", [])
+                )
             
         else:
             # Long format (standart zaman serisi)
