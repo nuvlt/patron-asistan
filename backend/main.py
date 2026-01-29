@@ -26,16 +26,35 @@ app.add_middleware(
 def is_wide_format(df: pd.DataFrame) -> bool:
     """Excel'in wide format olup olmadığını kontrol et"""
     
-    # Çok kolon var mı? (>15 kolon)
-    if len(df.columns) <= 15:
+    # Çok az kolon varsa kesinlikle long format
+    if len(df.columns) <= 10:
         return False
     
-    # İlk kolon text, geri kalanlar sayısal mı?
+    # Çok kolon var mı? (>15 kolon)
+    if len(df.columns) < 15:
+        return False
+    
+    # İlk kolonda tarih var mı kontrol et
+    try:
+        first_col = df.iloc[:, 0]
+        # İlk kolonu tarihe çevirmeyi dene
+        dates = pd.to_datetime(first_col, errors='coerce')
+        valid_dates = dates.notna().sum()
+        
+        # Eğer ilk kolonun %30'undan fazlası tarihse, bu long format
+        if valid_dates / len(first_col) > 0.3:
+            return False
+    except:
+        pass
+    
+    # İlk kolon text, geri kalanlar çoğunlukla sayısal mı?
     try:
         first_col_text = df.iloc[:, 0].dtype == 'object'
-        numeric_ratio = len(df.select_dtypes(include=[np.number]).columns) / len(df.columns)
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        numeric_ratio = len(numeric_cols) / len(df.columns)
         
-        return first_col_text and numeric_ratio > 0.7
+        # İlk kolon text VE kolonların %60'ından fazlası sayısal ise wide format
+        return first_col_text and numeric_ratio > 0.6
     except:
         return False
 
@@ -215,7 +234,7 @@ def analyze_excel(df: pd.DataFrame, target_column: str):
     }
 
 def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
-    """Prophet ile forecast"""
+    """Prophet ile forecast - hata varsa sklearn'e düş"""
     
     try:
         # Prophet formatına dönüştür
@@ -231,6 +250,11 @@ def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, period
             yearly_seasonality=True if len(prophet_df) > 365 else False,
             changepoint_prior_scale=0.05
         )
+        
+        # Stan backend sorunu için suppress warnings
+        import logging
+        logging.getLogger('prophet').setLevel(logging.ERROR)
+        
         model.fit(prophet_df)
         
         # Tahminler
@@ -273,9 +297,74 @@ def prophet_forecast(df: pd.DataFrame, target_column: str, date_col: str, period
         }
     
     except Exception as e:
+        # Prophet başarısız olursa sklearn ile basit tahmin yap
+        print(f"Prophet failed: {str(e)}, falling back to sklearn")
+        return sklearn_fallback_forecast(df, target_column, date_col, periods)
+
+def sklearn_fallback_forecast(df: pd.DataFrame, target_column: str, date_col: str, periods: int = 4):
+    """Prophet çalışmazsa sklearn ile basit forecast"""
+    
+    try:
+        # Tarihleri sayıya çevir
+        df = df.sort_values(by=date_col)
+        df['days'] = (df[date_col] - df[date_col].min()).dt.days
+        
+        # Linear regression
+        X = df[['days']].values
+        y = df[target_column].values
+        
+        model = LinearRegression()
+        model.fit(X, y)
+        
+        # Tahminler
+        last_date = df[date_col].max()
+        last_days = df['days'].max()
+        
+        forecasts = []
+        for i in range(1, periods + 1):
+            forecast_date = last_date + timedelta(days=30 * i)
+            forecast_days = last_days + (30 * i)
+            
+            forecast_value = model.predict([[forecast_days]])[0]
+            
+            # Basit güven aralığı
+            std_error = np.std(y - model.predict(X))
+            
+            forecasts.append({
+                "date": forecast_date.strftime('%Y-%m-%d'),
+                "value": round(max(0, forecast_value), 2),
+                "lower": round(max(0, forecast_value - std_error * 1.96), 2),
+                "upper": round(max(0, forecast_value + std_error * 1.96), 2),
+                "month": i
+            })
+        
+        # Grafik verisi
+        historical = df.tail(12)
+        
+        chart_data = {
+            "historical": {
+                "dates": historical[date_col].dt.strftime('%Y-%m-%d').tolist(),
+                "values": historical[target_column].tolist()
+            },
+            "forecast": {
+                "dates": [f['date'] for f in forecasts],
+                "values": [f['value'] for f in forecasts],
+                "lower": [f['lower'] for f in forecasts],
+                "upper": [f['upper'] for f in forecasts]
+            }
+        }
+        
+        return {
+            "success": True,
+            "forecasts": forecasts,
+            "method": "linear_regression_fallback",
+            "chart_data": chart_data
+        }
+    
+    except Exception as e:
         return {
             "success": False,
-            "message": f"Prophet forecast yapılamadı: {str(e)}"
+            "message": f"Forecast yapılamadı: {str(e)}"
         }
 
 @app.get("/")
@@ -297,7 +386,23 @@ async def analyze_file(
     try:
         # Dosyayı oku
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        
+        # Önce ham oku - boş satırları tespit et
+        df_raw = pd.read_excel(io.BytesIO(contents), header=None)
+        
+        # İlk boş olmayan satırı bul
+        first_data_row = 0
+        for idx, row in df_raw.iterrows():
+            if not row.isnull().all():
+                first_data_row = idx
+                break
+        
+        # Eğer ilk satır boşsa veya çok az veri varsa, bir sonraki satırdan başla
+        if df_raw.iloc[first_data_row].isnull().sum() > len(df_raw.columns) * 0.5:
+            first_data_row += 1
+        
+        # Düzgün header ile oku
+        df = pd.read_excel(io.BytesIO(contents), skiprows=first_data_row)
         
         # Format tespiti
         is_wide = is_wide_format(df)
