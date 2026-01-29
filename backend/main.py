@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 import io
 import json
 from typing import Optional
@@ -276,7 +277,7 @@ def wide_format_forecast(period_data: list, period_info: list, periods: int = 4)
         else:
             last_date = datetime.now()
         
-        # Tahminler
+        # Tahminler - relativedelta ile doğru ay hesabı
         forecasts = []
         for i in range(1, periods + 1):
             future_x = n + i - 1
@@ -285,8 +286,8 @@ def wide_format_forecast(period_data: list, period_info: list, periods: int = 4)
             # Güven aralığı
             std_error = np.std(y - model.predict(X))
             
-            # Gelecek tarih (her ay için)
-            future_date = last_date + timedelta(days=30 * i)
+            # Gelecek tarih (relativedelta ile ay bazlı)
+            future_date = last_date + relativedelta(months=i)
             
             forecasts.append({
                 "date": future_date.strftime('%b %Y'),  # Oca 2027
