@@ -207,12 +207,12 @@ Lütfen şu başlıklarla cevap ver:
                       <AreaChart
                         data={[
                           ...result.forecast.chart_data.historical.dates.map((date, idx) => ({
-                            date: new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
+                            date: date.includes('Dönem') ? date : new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
                             Gerçekleşen: result.forecast.chart_data.historical.values[idx],
                             type: 'historical'
                           })),
                           ...result.forecast.chart_data.forecast.dates.map((date, idx) => ({
-                            date: new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
+                            date: date.includes('Dönem') ? date : new Date(date).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' }),
                             Tahmin: result.forecast.chart_data.forecast.values[idx],
                             'Alt Sınır': result.forecast.chart_data.forecast.lower[idx],
                             'Üst Sınır': result.forecast.chart_data.forecast.upper[idx],
@@ -232,7 +232,13 @@ Lütfen şu başlıklarla cevap ver:
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" />
-                        <XAxis dataKey="date" angle={-45} textAnchor="end" height={80} />
+                        <XAxis 
+                          dataKey="date" 
+                          angle={-45} 
+                          textAnchor="end" 
+                          height={80}
+                          tick={{ fontSize: 11 }}
+                        />
                         <YAxis />
                         <Tooltip 
                           formatter={(value) => value?.toLocaleString('tr-TR')}
@@ -289,7 +295,10 @@ Lütfen şu başlıklarla cevap ver:
                     <div key={idx} className="bg-gradient-to-r from-green-50 to-emerald-50 p-5 rounded-lg border border-green-200">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-bold text-gray-700 text-lg">
-                          {idx + 1}. Ay - {new Date(f.date).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })}
+                          {f.date.includes('Dönem') 
+                            ? f.date 
+                            : `${idx + 1}. Ay - ${new Date(f.date).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })}`
+                          }
                         </span>
                         <span className="text-2xl font-bold text-green-700">
                           {f.value.toLocaleString('tr-TR')} ₺
