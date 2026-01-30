@@ -118,7 +118,8 @@ def is_wide_format(df: pd.DataFrame) -> bool:
     except:
         return False
 
-def analyze_wide_format(df: pd.DataFrame) -> dict:
+def analyze_wide_format(df: pd.DataFrame, selected_category: Optional[str] = None, 
+                       start_date: Optional[str] = None, end_date: Optional[str] = None) -> dict:
     """
     Wide format analizi - Gerçek tarihlerle
     Satırlarda: Ürün/Oyun/Kategori
@@ -149,8 +150,15 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
         
         # Her satırın toplamını hesapla
         df['_total'] = df[numeric_cols].sum(axis=1, skipna=True)
-        max_idx = df['_total'].idxmax()
-        target_item = df.iloc[max_idx][id_column]
+        
+        # Kategori seçimi
+        if selected_category and selected_category in items:
+            target_item = selected_category
+            max_idx = df[df[id_column] == selected_category].index[0]
+        else:
+            # En yüksek toplam değeri bul
+            max_idx = df['_total'].idxmax()
+            target_item = df.iloc[max_idx][id_column]
         
         # Target item'ın verisini al
         target_row = df.iloc[max_idx]
@@ -159,8 +167,18 @@ def analyze_wide_format(df: pd.DataFrame) -> dict:
         dated_values = []
         dated_periods = []
         
+        # Tarih filtresi için parse et
+        filter_start = datetime.strptime(start_date, '%Y-%m-%d') if start_date else None
+        filter_end = datetime.strptime(end_date, '%Y-%m-%d') if end_date else None
+        
         for info in period_info:
             if info['date'] and info['column'] in df.columns:
+                # Tarih filtresi uygula
+                if filter_start and info['date'] < filter_start:
+                    continue
+                if filter_end and info['date'] > filter_end:
+                    continue
+                    
                 val = target_row[info['column']]
                 if pd.notna(val) and val != 0:
                     try:
@@ -625,9 +643,12 @@ def root():
 @app.post("/analyze")
 async def analyze_file(
     file: UploadFile = File(...),
-    target_column: Optional[str] = None
+    target_column: Optional[str] = None,
+    selected_category: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
 ):
-    """Excel dosyasını akıllıca analiz et - hem wide hem long format"""
+    """Excel dosyasını akıllıca analiz et - kategori ve tarih filtreli"""
     
     try:
         # Dosyayı oku
@@ -655,8 +676,26 @@ async def analyze_file(
         
         # Analiz
         if is_wide:
-            # Wide format (oyun bazlı satışlar gibi)
-            analysis = analyze_wide_format(df)
+            # Wide format için kategori listesi gönder
+            id_column = df.columns[0]
+            available_categories = df[id_column].dropna().tolist()[:50]  # İlk 50 kategori
+            
+            # Tarih aralığı bilgisi
+            period_info = parse_period_headers(df)
+            available_dates = []
+            if period_info:
+                available_dates = [{
+                    'date': p['date'].strftime('%Y-%m-%d') if p['date'] else None,
+                    'display': p['display']
+                } for p in period_info if p['date']]
+            
+            # Seçili kategori ile analiz
+            analysis = analyze_wide_format(
+                df, 
+                selected_category=selected_category,
+                start_date=start_date,
+                end_date=end_date
+            )
             
             # Wide format için forecast
             forecast_result = None
@@ -686,6 +725,9 @@ async def analyze_file(
             forecast_result = None
             if analysis.get("can_forecast") and analysis.get("date_column"):
                 forecast_result = prophet_forecast(df, target_column, analysis["date_column"])
+            
+            available_categories = []
+            available_dates = []
         
         # Frontend için response hazırla
         claude_prompt_data = {
@@ -706,7 +748,9 @@ async def analyze_file(
             "columns": df.columns.tolist() if not is_wide else analysis.get("available_items", [])[:10],
             "target_column": analysis.get("target_column"),
             "claude_prompt_data": claude_prompt_data,
-            "format_detected": "wide" if is_wide else "long"
+            "format_detected": "wide" if is_wide else "long",
+            "available_categories": available_categories if is_wide else [],
+            "available_dates": available_dates if is_wide else []
         }
     
     except Exception as e:
