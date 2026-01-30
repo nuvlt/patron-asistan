@@ -11,6 +11,11 @@ export default function Home() {
   const [claudePrompt, setClaudePrompt] = useState('');
   const [cfoComment, setCfoComment] = useState('');
   const [commentLoading, setCommentLoading] = useState(false);
+  
+  // Filtreler
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -36,6 +41,17 @@ export default function Home() {
 
     const formData = new FormData();
     formData.append('file', file);
+    
+    // Filtreler varsa ekle
+    if (selectedCategory) {
+      formData.append('selected_category', selectedCategory);
+    }
+    if (startDate) {
+      formData.append('start_date', startDate);
+    }
+    if (endDate) {
+      formData.append('end_date', endDate);
+    }
 
     try {
       const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -157,6 +173,76 @@ Lütfen şu başlıklarla cevap ver:
             >
               {loading ? 'Analiz ediliyor...' : 'Analiz Et'}
             </button>
+
+            {/* Filtreler - Sonuç geldikten sonra göster */}
+            {result && result.available_categories && result.available_categories.length > 0 && (
+              <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <h3 className="font-semibold text-gray-900 mb-4">🎯 Filtreleme Seçenekleri</h3>
+                
+                {/* Kategori Seçici */}
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Kategori/Oyun Seç
+                  </label>
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">Otomatik (En yüksek)</option>
+                    {result.available_categories.map((cat, idx) => (
+                      <option key={idx} value={cat}>{cat}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Tarih Aralığı */}
+                {result.available_dates && result.available_dates.length > 0 && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Başlangıç Tarihi
+                      </label>
+                      <select
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">Tümü</option>
+                        {result.available_dates.map((d, idx) => (
+                          <option key={idx} value={d.date}>{d.display}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        Bitiş Tarihi
+                      </label>
+                      <select
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value="">Tümü</option>
+                        {result.available_dates.map((d, idx) => (
+                          <option key={idx} value={d.date}>{d.display}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={handleAnalyze}
+                  disabled={loading}
+                  className="mt-4 w-full bg-green-600 text-white py-2 px-4 rounded-lg
+                    font-semibold hover:bg-green-700 disabled:bg-gray-400
+                    disabled:cursor-not-allowed transition-colors"
+                >
+                  🔄 Filtreleri Uygula ve Tekrar Analiz Et
+                </button>
+              </div>
+            )}
 
             {error && (
               <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
