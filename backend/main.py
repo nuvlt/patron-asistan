@@ -536,6 +536,83 @@ def sklearn_fallback_forecast(df: pd.DataFrame, target_column: str, date_col: st
             "message": f"Forecast yapılamadı: {str(e)}"
         }
 
+@app.post("/generate-cfo-comment")
+async def generate_cfo_comment(analysis_data: dict):
+    """
+    Analiz verilerinden otomatik CFO yorumu üret
+    NOT: Claude API key gerektirir (opsiyonel)
+    """
+    
+    # Basit template-based yorum (API olmadan)
+    trend = analysis_data.get('trend', 'sabit')
+    trend_pct = analysis_data.get('trend_percentage', 0)
+    risk = analysis_data.get('risk_level', 'orta')
+    target = analysis_data.get('target_column', 'Toplam')
+    
+    # 1. Genel Gidişat
+    if trend_pct > 20:
+        genel = f"**{target}** performansı son dönemde **{trend}** gösteriyor (%{abs(trend_pct):.1f}). Bu hızlı büyüme sürdürülebilir olmayabilir, dikkatli izlenmeli."
+    elif trend_pct > 10:
+        genel = f"**{target}** sağlıklı bir **{trend}** trendinde (%{abs(trend_pct):.1f}). Mevcut momentum korunmalı."
+    elif trend_pct > 0:
+        genel = f"**{target}** ılımlı **{trend}** gösteriyor (%{abs(trend_pct):.1f}). Büyüme fırsatları değerlendirilmeli."
+    elif trend_pct < -10:
+        genel = f"**{target}**'da **{trend}** var (%{abs(trend_pct):.1f}). Acil aksiyon gerekiyor."
+    else:
+        genel = f"**{target}** **sabit** seyrediyor. Büyüme stratejileri gözden geçirilmeli."
+    
+    # 2. Risk Durumu
+    if risk == "yüksek":
+        risk_text = "⚠️ **Yüksek volatilite** tespit edildi. Nakit akışı yakından takip edilmeli. Beklenmedik dalgalanmalara karşı yedek plan hazır olmalı."
+    elif risk == "orta":
+        risk_text = "📊 **Orta seviye risk** mevcut. Normal iş döngüsü içinde. Düzenli izleme yeterli."
+    else:
+        risk_text = "✅ **Düşük risk** profili. İstikrarlı performans. Büyüme için uygun ortam."
+    
+    # 3. Öneriler
+    if trend_pct > 15 and risk == "yüksek":
+        oneriler = """**30 gün:** Hızlı büyümenin sürdürülebilirliğini analiz edin. Nakit pozisyonunu güçlendirin.
+**60 gün:** Operasyonel kapasiteyi gözden geçirin. Darboğazları belirleyin.
+**90 gün:** Büyüme için yatırım planı hazırlayın (ihtiyatlı yaklaşım).
+**120 gün:** Performansı benchmark'larla karşılaştırın. Stratejik hedefleri güncelleyin."""
+    elif trend_pct > 5:
+        oneriler = """**30 gün:** Mevcut stratejiye devam edin. KPI'ları günlük izleyin.
+**60 gün:** Büyüme fırsatlarını değerlendirin. Rekabet analizi yapın.
+**90 gün:** Yeni pazarlar/ürünler için pilot projeler başlatın.
+**120 gün:** Yıllık hedefleri revize edin."""
+    elif trend_pct < -5:
+        oneriler = """**30 gün:** ⚠️ Düşüş nedenlerini acilen tespit edin. Kriz planını aktive edin.
+**60 gün:** Maliyet optimizasyonu başlatın. Gereksiz harcamaları durdurun.
+**90 gün:** Yeni gelir kanalları araştırın. Müşteri geri bildirimlerini analiz edin.
+**120 gün:** Stratejik pivot gerekip gerekmediğini değerlendirin."""
+    else:
+        oneriler = """**30 gün:** Büyüme engeli var mı araştırın. Pazar dinamiklerini inceleyin.
+**60 gün:** İnovasyon fırsatları belirleyin. Rakip analizini güncelleyin.
+**90 gün:** Deneysel büyüme taktikleri test edin (A/B testler).
+**120 gün:** Orta-uzun vadeli strateji geliştirin."""
+    
+    yorum = f"""## 1. Genel Gidişat
+
+{genel}
+
+## 2. Risk Durumu
+
+{risk_text}
+
+## 3. Önümüzdeki Dönem Önerileri
+
+{oneriler}
+
+---
+*Bu analiz otomatik üretilmiştir. Detaylı değerlendirme için CFO ile görüşün.*
+"""
+    
+    return {
+        "success": True,
+        "comment": yorum,
+        "method": "template_based"
+    }
+
 @app.get("/")
 def root():
     return {
