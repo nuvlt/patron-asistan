@@ -1,4 +1,4 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import pandas as pd
@@ -126,6 +126,12 @@ def analyze_wide_format(df: pd.DataFrame, selected_category: Optional[str] = Non
     Kolonlarda: Dönemler (aylar, yıllar)
     """
     
+    # Debug
+    print(f"=== ANALYZE_WIDE_FORMAT ===")
+    print(f"selected_category: {selected_category}")
+    print(f"start_date: {start_date}")
+    print(f"end_date: {end_date}")
+    
     try:
         id_column = df.columns[0]
         items = df[id_column].dropna().tolist()
@@ -152,13 +158,18 @@ def analyze_wide_format(df: pd.DataFrame, selected_category: Optional[str] = Non
         df['_total'] = df[numeric_cols].sum(axis=1, skipna=True)
         
         # Kategori seçimi
-        if selected_category and selected_category in items:
+        print(f"Available items (first 5): {items[:5]}")
+        print(f"Checking if '{selected_category}' in items: {selected_category in items if selected_category else 'No category selected'}")
+        
+        if selected_category and selected_category != '' and selected_category in items:
             target_item = selected_category
             max_idx = df[df[id_column] == selected_category].index[0]
+            print(f"✅ Using selected category: {target_item}")
         else:
             # En yüksek toplam değeri bul
             max_idx = df['_total'].idxmax()
             target_item = df.iloc[max_idx][id_column]
+            print(f"ℹ️  Using highest total: {target_item}")
         
         # Target item'ın verisini al
         target_row = df.iloc[max_idx]
@@ -168,15 +179,19 @@ def analyze_wide_format(df: pd.DataFrame, selected_category: Optional[str] = Non
         dated_periods = []
         
         # Tarih filtresi için parse et
-        filter_start = datetime.strptime(start_date, '%Y-%m-%d') if start_date else None
-        filter_end = datetime.strptime(end_date, '%Y-%m-%d') if end_date else None
+        filter_start = datetime.strptime(start_date, '%Y-%m-%d') if start_date and start_date != '' else None
+        filter_end = datetime.strptime(end_date, '%Y-%m-%d') if end_date and end_date != '' else None
+        
+        print(f"Date filters: start={filter_start}, end={filter_end}")
         
         for info in period_info:
             if info['date'] and info['column'] in df.columns:
                 # Tarih filtresi uygula
                 if filter_start and info['date'] < filter_start:
+                    print(f"  Skipping {info['display']} (before start)")
                     continue
                 if filter_end and info['date'] > filter_end:
+                    print(f"  Skipping {info['display']} (after end)")
                     continue
                     
                 val = target_row[info['column']]
@@ -184,8 +199,11 @@ def analyze_wide_format(df: pd.DataFrame, selected_category: Optional[str] = Non
                     try:
                         dated_values.append(float(val))
                         dated_periods.append(info)
+                        print(f"  ✅ Including {info['display']}: {val}")
                     except:
                         pass
+        
+        print(f"Total values after filtering: {len(dated_values)}")
         
         if len(dated_values) < 3:
             return {
@@ -643,14 +661,17 @@ def root():
 @app.post("/analyze")
 async def analyze_file(
     file: UploadFile = File(...),
-    target_column: Optional[str] = None,
-    selected_category: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None
+    target_column: Optional[str] = Form(None),
+    selected_category: Optional[str] = Form(None),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None)
 ):
     """Excel dosyasını akıllıca analiz et - kategori ve tarih filtreli"""
     
     try:
+        # Debug log
+        print(f"Received filters: category={selected_category}, start={start_date}, end={end_date}")
+        
         # Dosyayı oku
         contents = await file.read()
         
