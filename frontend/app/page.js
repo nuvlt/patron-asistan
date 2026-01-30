@@ -9,6 +9,8 @@ export default function Home() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [claudePrompt, setClaudePrompt] = useState('');
+  const [cfoComment, setCfoComment] = useState('');
+  const [commentLoading, setCommentLoading] = useState(false);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -68,6 +70,32 @@ Lütfen şu başlıklarla cevap ver:
 3. Önümüzdeki 30-60-90-120 gün için öneriler`;
       
       setClaudePrompt(prompt);
+
+      // Otomatik CFO yorumu al
+      setCommentLoading(true);
+      try {
+        const commentResponse = await fetch(`${API_URL}/generate-cfo-comment`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            trend: data.analysis.trend,
+            trend_percentage: data.analysis.trend_percentage,
+            risk_level: data.analysis.risk_level,
+            target_column: data.analysis.target_column
+          }),
+        });
+        
+        const commentData = await commentResponse.json();
+        if (commentData.success) {
+          setCfoComment(commentData.comment);
+        }
+      } catch (err) {
+        console.error('CFO yorumu alınamadı:', err);
+      } finally {
+        setCommentLoading(false);
+      }
 
     } catch (err) {
       setError(err.message);
@@ -201,7 +229,7 @@ Lütfen şu başlıklarla cevap ver:
                 <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-4 rounded">
                   <p className="text-sm text-blue-800">
                     💡 <strong>Değerler:</strong> {result.format_detected === 'wide' 
-                      ? 'Bin TL cinsinden aylık toplam cirolar' 
+                      ? 'Milyon TL cinsinden aylık toplam cirolar' 
                       : 'TL cinsinden değerler'}
                   </p>
                 </div>
@@ -290,7 +318,7 @@ Lütfen şu başlıklarla cevap ver:
                       </AreaChart>
                     </ResponsiveContainer>
                     <p className="text-sm text-gray-600 mt-4 text-center">
-                      💡 Mavi alan: Geçmiş veriler (Bin TL) | Yeşil alan: Tahmin (Bin TL) | Gri çizgiler: Güven aralığı (%95)
+                      💡 Mavi alan: Geçmiş veriler (Milyon TL) | Yeşil alan: Tahmin (Milyon TL) | Gri çizgiler: Güven aralığı (%95)
                     </p>
                   </div>
                 )}
@@ -300,7 +328,7 @@ Lütfen şu başlıklarla cevap ver:
                   <h3 className="text-lg font-semibold text-gray-700 mb-3">
                     📊 Detaylı Tahminler
                     <span className="text-sm font-normal text-gray-500 ml-2">
-                      (Bin TL)
+                      (Milyon TL)
                     </span>
                   </h3>
                   {result.forecast.forecasts.map((f, idx) => (
@@ -310,15 +338,15 @@ Lütfen şu başlıklarla cevap ver:
                           {f.date}
                         </span>
                         <span className="text-2xl font-bold text-green-700">
-                          {f.value.toLocaleString('tr-TR')} bin ₺
+                          {f.value.toLocaleString('tr-TR')} Milyon ₺
                         </span>
                       </div>
                       <div className="flex justify-between text-sm text-gray-600">
-                        <span>Alt Sınır: {f.lower.toLocaleString('tr-TR')} bin ₺</span>
-                        <span>Üst Sınır: {f.upper.toLocaleString('tr-TR')} bin ₺</span>
+                        <span>Alt Sınır: {f.lower.toLocaleString('tr-TR')} Milyon ₺</span>
+                        <span>Üst Sınır: {f.upper.toLocaleString('tr-TR')} Milyon ₺</span>
                       </div>
                       <div className="mt-2 text-xs text-gray-500 italic">
-                        Gerçek değer: ~{(f.value * 1000).toLocaleString('tr-TR')} ₺
+                        Gerçek değer: ~{(f.value * 1000000).toLocaleString('tr-TR')} ₺
                       </div>
                     </div>
                   ))}
@@ -338,30 +366,72 @@ Lütfen şu başlıklarla cevap ver:
               </div>
             )}
 
-            {/* Claude Prompt */}
+            {/* CFO Yorumu */}
             <div className="bg-white rounded-lg shadow-lg p-8">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-2xl font-bold text-gray-900">
-                  🤖 CFO Yorumu için Claude Prompt
+                  🤖 CFO Yorumu
                 </h2>
-                <button
-                  onClick={copyToClipboard}
-                  className="bg-green-600 text-white px-4 py-2 rounded-lg
-                    hover:bg-green-700 transition-colors text-sm font-semibold"
-                >
-                  📋 Kopyala
-                </button>
               </div>
               
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono">
-                  {claudePrompt}
-                </pre>
-              </div>
+              {commentLoading ? (
+                <div className="flex items-center justify-center p-8">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+                  <span className="ml-4 text-gray-600">Analiz ediliyor...</span>
+                </div>
+              ) : cfoComment ? (
+                <div className="prose max-w-none">
+                  <div className="bg-gray-50 p-6 rounded-lg border border-gray-200">
+                    {cfoComment.split('\n').map((line, idx) => {
+                      if (line.startsWith('## ')) {
+                        return <h2 key={idx} className="text-xl font-bold text-gray-900 mt-6 mb-3">{line.replace('## ', '')}</h2>;
+                      } else if (line.startsWith('**') && line.endsWith('**')) {
+                        return <p key={idx} className="font-bold text-gray-800 mt-4 mb-2">{line.replace(/\*\*/g, '')}</p>;
+                      } else if (line.includes('**')) {
+                        const parts = line.split('**');
+                        return (
+                          <p key={idx} className="text-gray-700 mb-2">
+                            {parts.map((part, i) => i % 2 === 1 ? <strong key={i}>{part}</strong> : part)}
+                          </p>
+                        );
+                      } else if (line.startsWith('⚠️') || line.startsWith('✅') || line.startsWith('📊')) {
+                        return <p key={idx} className="text-gray-700 mb-3 pl-4 border-l-2 border-blue-500">{line}</p>;
+                      } else if (line.trim() === '---') {
+                        return <hr key={idx} className="my-6 border-gray-300" />;
+                      } else if (line.trim() === '') {
+                        return <br key={idx} />;
+                      } else {
+                        return <p key={idx} className="text-gray-700 mb-2">{line}</p>;
+                      }
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
+                  <p className="text-sm text-yellow-800">
+                    ⚠️ Otomatik yorum oluşturulamadı. Manuel prompt kullanabilirsiniz.
+                  </p>
+                </div>
+              )}
               
-              <p className="mt-4 text-sm text-gray-600">
-                👆 Bu prompt'u kopyalayıp Claude.ai'a yapıştırarak CFO yorumunu alabilirsiniz
-              </p>
+              {/* Manuel Prompt (opsiyonel) */}
+              <details className="mt-6">
+                <summary className="cursor-pointer text-sm text-gray-600 hover:text-gray-900">
+                  Manuel Claude Prompt'unu göster
+                </summary>
+                <div className="mt-4 bg-gray-50 p-4 rounded-lg border border-gray-200">
+                  <pre className="text-xs text-gray-700 whitespace-pre-wrap font-mono">
+                    {claudePrompt}
+                  </pre>
+                  <button
+                    onClick={copyToClipboard}
+                    className="mt-4 bg-green-600 text-white px-4 py-2 rounded-lg
+                      hover:bg-green-700 transition-colors text-sm font-semibold"
+                  >
+                    📋 Kopyala
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
         )}
